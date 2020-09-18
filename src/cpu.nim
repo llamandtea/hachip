@@ -111,30 +111,89 @@ proc fetchDecodeExecute(cpu: var CPU) =
 
     of 0x3000:      # Skip the next instruction if the specified register
                     # equals to a literal
-        discard
+        if cpu.registers[(cpu.opcode and 0x0F00) shr 8] ==
+            uint8(cpu.opcode and 0x00FF):
+            cpu.programCounter += 4
+        else:
+            cpu.programCounter += 2
+
     of 0x4000:      # Skip the next instruction if the specified register
                     # is not equal to a literal
-        discard
+        if cpu.registers[(cpu.opcode and 0x0F00) shr 8] !=
+            uint8(cpu.opcode and 0x00FF):
+            cpu.programCounter += 4
+        else:
+            cpu.programCounter += 2
+
     of 0x5000:      # Skip the next instruction if the specified registers
                     # are equal
-        discard
+        if cpu.registers[(cpu.opcode and 0x0F00) shr 8] ==
+            cpu.registers[(cpu.opcode and 0x00F0) shr 4]:
+            cpu.programCounter += 4
+        else:
+            cpu.programCounter += 2
+
     of 0x6000:      # Set the specified register to a literal
-        discard
+        cpu.registers[(cpu.opcode and 0x0F00) shr 8] =
+            uint8(cpu.opcode and 0x00FF)
+        cpu.programCounter += 2
+
     of 0x7000:      # Add to the specified register a literal
-        discard
+                    # Carry flag is not changed, the register can overflow
+
+        # If the resulting number can't be stored in the register, the integer
+        # will wrap around. Since nim prevents unsigned integer overflows,
+        # the behaviour is implemented catching an OverflowError
+        try:
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] +=
+                uint8(cpu.opcode and 0x00FF)
+        except OverflowError:
+
+            #[
+                The resulting value is calculated as
+                    min(a, b) - (255 - max(a, b)) - 1
+            ]#
+            var val: uint8
+            if cpu.registers[(cpu.opcode and 0x0F00) shr 8] > (cpu.opcode and 0x00FF):
+                val = (uint8(cpu.opcode and 0x00FF) -
+                    (uint8(0xFF) - cpu.registers[(cpu.opcode and 0x0F00) shr 8])) - 1
+
+            else:
+                val = (cpu.registers[(cpu.opcode and 0x0F00) shr 8]) -
+                    (uint8(0xFF) - uint8(cpu.opcode and 0x00FF)) - 1
+
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] = val
+
+        cpu.programCounter += 2
+
     of 0x8000:      # Prefix of operations regarding the registers
                     # the first register specified is referred as X
                     # the second register specified is regerred as Y
 
         case cpu.opcode and 0x000F
         of 0x0000:      # Assign the value of Y to X
-            discard
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] =
+                cpu.registers[(cpu.opcode and 0x00F0) shr 4]
+            cpu.programCounter += 2
+
         of 0x0001:      # Set the value of X to X OR Y
-            discard
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] =
+                cpu.registers[(cpu.opcode and 0x0F00) shr 8] or
+                    cpu.registers[(cpu.opcode and 0x00F0) shr 4]
+            cpu.programCounter += 2
+
         of 0x0002:      # Set the value of X to X AND Y
-            discard
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] =
+                cpu.registers[(cpu.opcode and 0x0F00) shr 8] and
+                    cpu.registers[(cpu.opcode and 0x00F0) shr 4]
+            cpu.programCounter += 2
+
         of 0x0003:      # Set the value of X to X XOR Y
-            discard
+            cpu.registers[(cpu.opcode and 0x0F00) shr 8] =
+                cpu.registers[(cpu.opcode and 0x0F00) shr 8] xor
+                    cpu.registers[(cpu.opcode and 0x00F0) shr 4]
+            cpu.programCounter += 2
+
         of 0x0004:      # Set the value of X to X + Y
 
             if(cpu.registers[((cpu.opcode and 0x00F0) shr 4)] >
@@ -147,8 +206,19 @@ proc fetchDecodeExecute(cpu: var CPU) =
                 cpu.registers[((cpu.opcode and 0x0F00) shr 8)] +=
                     cpu.registers[((cpu.opcode and 0x00F0) shr 4)]
             except OverflowError:
-                cpu.registers[((cpu.opcode and 0x0F00) shr 8)] = 0
-                    
+
+                var val: uint8
+                if cpu.registers[((cpu.opcode and 0x0F00) shr 8)] >
+                    cpu.registers[((cpu.opcode and 0x00F0) shr 4)]:
+
+                    val = cpu.registers[((cpu.opcode and 0x00F0) shr 4)] -
+                        (uint8(0xFF) - cpu.registers[(cpu.opcode and 0x0F00) shr 8]) - 1
+                else:
+                    val = (cpu.registers[(cpu.opcode and 0x0F00) shr 8]) -
+                        (uint8(0xFF) - cpu.registers[((cpu.opcode and 0x00F0) shr 4)]) - 1
+
+                (cpu.registers[(cpu.opcode and 0x0F00) shr 8]) = val
+            
             cpu.programCounter += 2
 
         of 0x0005:      # Set the value of X to X - Y
@@ -167,7 +237,9 @@ proc fetchDecodeExecute(cpu: var CPU) =
     of 0x9000:      # Skip the next instruction if X != Y
         discard
     of 0xA000:      # Set the value of the IndexRegister to a literal
-        discard
+        cpu.indexRegister = cpu.opcode and 0x0FFF
+        cpu.programCounter += 2
+
     of 0xB000:      # Set the program counter to a literal plus V0
         discard
     of 0xC000:      # Set the register X to the result of a bitwise AND
